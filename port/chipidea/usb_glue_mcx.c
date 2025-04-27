@@ -24,7 +24,96 @@ typedef enum _usb_controller_index {
 #define BOARD_XTAL0_CLK_HZ      24000000U /*!< Board xtal0 frequency in Hz */
 
 #if ((defined FSL_FEATURE_SOC_USBPHY_COUNT) && (FSL_FEATURE_SOC_USBPHY_COUNT > 0U))
-#include "usb_phy.h"
+typedef struct _usb_phy_config_struct
+{
+    uint8_t D_CAL;     /* Decode to trim the nominal 17.78mA current source */
+    uint8_t TXCAL45DP; /* Decode to trim the nominal 45-Ohm series termination resistance to the USB_DP output pin */
+    uint8_t TXCAL45DM; /* Decode to trim the nominal 45-Ohm series termination resistance to the USB_DM output pin */
+} usb_phy_config_struct_t;
+
+void *USB_EhciPhyGetBase(uint8_t controllerId)
+{
+    void *usbPhyBase = NULL;
+#if ((defined FSL_FEATURE_SOC_USBPHY_COUNT) && (FSL_FEATURE_SOC_USBPHY_COUNT > 0U))
+#if defined(USBPHY_STACK_BASE_ADDRS)
+    uint32_t usbphy_base[] = USBPHY_STACK_BASE_ADDRS;
+#else
+    uint32_t usbphy_base[] = USBPHY_BASE_ADDRS;
+#endif
+    uint32_t *temp;
+    if (controllerId < (uint8_t)kUSB_ControllerEhci0)
+    {
+        return NULL;
+    }
+
+    if ((controllerId == (uint8_t)kUSB_ControllerEhci0) || (controllerId == (uint8_t)kUSB_ControllerEhci1))
+    {
+        controllerId = controllerId - (uint8_t)kUSB_ControllerEhci0;
+    }
+    else
+    {
+        return NULL;
+    }
+
+    if (controllerId < (sizeof(usbphy_base) / sizeof(usbphy_base[0])))
+    {
+        temp       = (uint32_t *)usbphy_base[controllerId];
+        usbPhyBase = (void *)temp;
+    }
+    else
+    {
+        return NULL;
+    }
+#endif
+    return usbPhyBase;
+}
+
+void USB_EhciPhyInit(uint8_t controllerId, uint32_t freq, usb_phy_config_struct_t *phyConfig)
+{
+#if ((defined FSL_FEATURE_SOC_USBPHY_COUNT) && (FSL_FEATURE_SOC_USBPHY_COUNT > 0U))
+    USBPHY_Type *usbPhyBase;
+
+    usbPhyBase = (USBPHY_Type *)USB_EhciPhyGetBase(controllerId);
+    if (NULL == usbPhyBase)
+    {
+        return;
+    }
+
+#if ((defined FSL_FEATURE_SOC_ANATOP_COUNT) && (FSL_FEATURE_SOC_ANATOP_COUNT > 0U))
+    ANATOP->HW_ANADIG_REG_3P0.RW =
+        (ANATOP->HW_ANADIG_REG_3P0.RW &
+         (~(ANATOP_HW_ANADIG_REG_3P0_OUTPUT_TRG(0x1F) | ANATOP_HW_ANADIG_REG_3P0_ENABLE_ILIMIT_MASK))) |
+        ANATOP_HW_ANADIG_REG_3P0_OUTPUT_TRG(0x17) | ANATOP_HW_ANADIG_REG_3P0_ENABLE_LINREG_MASK;
+    ANATOP->HW_ANADIG_USB2_CHRG_DETECT.SET =
+        ANATOP_HW_ANADIG_USB2_CHRG_DETECT_CHK_CHRG_B_MASK | ANATOP_HW_ANADIG_USB2_CHRG_DETECT_EN_B_MASK;
+#endif
+
+#if (defined USB_ANALOG)
+    USB_ANALOG->INSTANCE[controllerId - (uint8_t)kUSB_ControllerEhci0].CHRG_DETECT_SET =
+        USB_ANALOG_CHRG_DETECT_CHK_CHRG_B(1) | USB_ANALOG_CHRG_DETECT_EN_B(1);
+#endif
+
+#if ((!(defined FSL_FEATURE_SOC_CCM_ANALOG_COUNT)) && (!(defined FSL_FEATURE_SOC_ANATOP_COUNT)))
+
+    usbPhyBase->TRIM_OVERRIDE_EN = 0x001fU; /* override IFR value */
+#endif
+    usbPhyBase->CTRL |= USBPHY_CTRL_SET_ENUTMILEVEL2_MASK; /* support LS device. */
+    usbPhyBase->CTRL |= USBPHY_CTRL_SET_ENUTMILEVEL3_MASK; /* support external FS Hub with LS device connected. */
+    /* PWD register provides overall control of the PHY power state */
+    usbPhyBase->PWD = 0U;
+    if (NULL != phyConfig)
+    {
+        /* Decode to trim the nominal 17.78mA current source for the High Speed TX drivers on USB_DP and USB_DM. */
+        usbPhyBase->TX =
+            ((usbPhyBase->TX & (~(USBPHY_TX_D_CAL_MASK | USBPHY_TX_TXCAL45DM_MASK | USBPHY_TX_TXCAL45DP_MASK))) |
+             (USBPHY_TX_D_CAL(phyConfig->D_CAL) | USBPHY_TX_TXCAL45DP(phyConfig->TXCAL45DP) |
+              USBPHY_TX_TXCAL45DM(phyConfig->TXCAL45DM)));
+    }
+#endif
+
+    return;
+}
+
 #endif
 
 #if (defined(USB_DEVICE_CONFIG_EHCI) && (USB_DEVICE_CONFIG_EHCI > 0U))
