@@ -175,7 +175,11 @@ elseif(ZEPHYR_BASE)
     endif()
 
     zephyr_library()
-    zephyr_include_directories(${cherryusb_incs})
-    zephyr_library_sources(${cherryusb_srcs})
+    if(cherryusb_incs)
+        zephyr_include_directories(${cherryusb_incs})
+    endif()
+    if(cherryusb_srcs)
+        zephyr_library_sources(${cherryusb_srcs})
+    endif()
 
 endif()
